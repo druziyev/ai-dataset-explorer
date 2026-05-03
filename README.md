@@ -104,8 +104,31 @@ The frontend will be available at `http://localhost:5173`.
 1. Open `http://localhost:5173` in your browser
 2. Drag & drop a CSV, Excel, or JSON file (or click to browse)
 3. Preview your data in the table
-4. Click **"Analyze Dataset"** to generate EDA and charts
 5. Switch to the **AI Chat** tab to ask questions about your data
+
+### 📸 Example Usage
+
+Here is a step-by-step example using a sample dataset (e.g., the Titanic dataset or a sales CSV). To add your own screenshots, capture the screens described below, save them in a `docs/screenshots/` folder, and the links will automatically render in this README.
+
+1. **Upload the Dataset**  
+   Drag and drop your `dataset.csv` file into the upload zone.  
+   *(Add a screenshot of the homepage with the upload area)*  
+   `![Upload Screen](docs/screenshots/1_upload.png)`
+
+2. **Data Preview**  
+   Instantly view the first 20 rows of your dataset to verify the columns and formatting.  
+   *(Add a screenshot of the data table preview)*  
+   `![Data Preview](docs/screenshots/2_preview.png)`
+
+3. **Exploratory Data Analysis (EDA) & Charts**  
+   Click "Analyze Dataset" to automatically generate statistics and interactive charts (histograms, heatmaps, scatter plots).  
+   *(Add a screenshot showing the generated charts and statistics)*  
+   `![EDA and Charts](docs/screenshots/3_charts.png)`
+
+4. **AI Chat**  
+   Switch to the "AI Chat" tab and ask questions like: *"What is the average age?"* or *"Summarize the key trends in this data."* The AI will stream the response back based on your dataset's context.  
+   *(Add a screenshot of the chat interface with a sample question and answer)*  
+   `![AI Chat](docs/screenshots/4_chat.png)`
 
 ## 🛠️ Tech Stack
 

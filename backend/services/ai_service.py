@@ -1,67 +1,87 @@
-"""AI service — LangChain agent with streaming for data Q&A."""
+"""AI service — OpenAI-powered data Q&A with streaming."""
 
 import asyncio
 import threading
 from typing import AsyncGenerator
 
 import pandas as pd
-from langchain.callbacks.base import BaseCallbackHandler
-from langchain_openai import ChatOpenAI
-from langchain_experimental.agents import create_pandas_dataframe_agent
+from openai import OpenAI
 
 from config import settings
 
-
-class QueueCallbackHandler(BaseCallbackHandler):
-    """Callback handler that puts LLM tokens into an asyncio queue."""
-
-    def __init__(self, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
-        self.queue = queue
-        self.loop = loop
-
-    def on_llm_new_token(self, token: str, **kwargs) -> None:
-        asyncio.run_coroutine_threadsafe(self.queue.put(token), self.loop)
+# Initialise the OpenAI client once
+_client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 
-def _build_agent(df: pd.DataFrame, callback_handler: QueueCallbackHandler):
-    """Create a LangChain pandas DataFrame agent."""
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        temperature=0,
-        streaming=True,
-        openai_api_key=settings.OPENAI_API_KEY,
-        callbacks=[callback_handler],
+def _build_dataframe_context(df: pd.DataFrame) -> str:
+    """Create a concise textual summary of the DataFrame for the LLM."""
+    shape = f"{df.shape[0]} rows × {df.shape[1]} columns"
+    cols = ", ".join(df.columns.tolist()[:40])
+
+    # Descriptive stats
+    desc = df.describe(include="all").to_string()
+
+    # Missing values
+    missing = df.isnull().sum()
+    missing_str = (
+        missing[missing > 0].to_string() if missing.any() else "No missing values"
     )
 
-    agent = create_pandas_dataframe_agent(
-        llm,
-        df,
-        agent_type="openai-tools",
-        verbose=False,
-        allow_dangerous_code=True,
-        prefix=(
-            "You are an expert data analyst. You have access to a pandas DataFrame called `df`. "
-            "When answering questions, always provide specific numbers, statistics, and insights. "
-            "Be concise but thorough. If the user asks for analysis, run the code and explain "
-            "the results clearly. Use markdown formatting in your answers when helpful."
-        ),
+    # Sample rows
+    sample = df.head(5).to_string()
+
+    return (
+        f"Shape: {shape}\n"
+        f"Columns: {cols}\n\n"
+        f"Descriptive Statistics:\n{desc}\n\n"
+        f"Missing Values:\n{missing_str}\n\n"
+        f"Sample Rows (first 5):\n{sample}"
     )
-    return agent
+
+
+SYSTEM_PROMPT = (
+    "You are an expert data analyst. You have access to a dataset described below. "
+    "When answering questions, always provide specific numbers, statistics, and insights. "
+    "Be concise but thorough. Use markdown formatting in your answers when helpful. "
+    "If the user asks for calculations you cannot perform exactly from the summary, "
+    "explain what analysis you would recommend and provide your best estimate from "
+    "the statistics available."
+)
 
 
 async def stream_agent_response(
     df: pd.DataFrame, message: str
 ) -> AsyncGenerator[str, None]:
-    """Stream tokens from the LangChain agent as an async generator."""
+    """Stream tokens from OpenAI as an async generator."""
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue = asyncio.Queue()
-    handler = QueueCallbackHandler(queue, loop)
 
-    agent = _build_agent(df, handler)
+    context = _build_dataframe_context(df)
 
-    def run_agent():
+    def run_openai():
         try:
-            agent.invoke({"input": message})
+            stream = _client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                temperature=0,
+                stream=True,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Here is the dataset I'm working with:\n\n"
+                            f"{context}\n\n"
+                            f"My question: {message}"
+                        ),
+                    },
+                ],
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put(delta.content), loop
+                    )
         except Exception as e:
             asyncio.run_coroutine_threadsafe(
                 queue.put(f"\n\n⚠️ Error: {str(e)}"), loop
@@ -69,7 +89,7 @@ async def stream_agent_response(
         finally:
             asyncio.run_coroutine_threadsafe(queue.put(None), loop)
 
-    thread = threading.Thread(target=run_agent, daemon=True)
+    thread = threading.Thread(target=run_openai, daemon=True)
     thread.start()
 
     while True:
@@ -85,28 +105,16 @@ async def stream_agent_response(
 
 def get_ai_summary(df: pd.DataFrame) -> str:
     """Generate a one-shot AI summary of the dataset (non-streaming)."""
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        temperature=0.2,
-        openai_api_key=settings.OPENAI_API_KEY,
-    )
-
-    # Build a concise data summary for context
-    desc = df.describe(include="all").to_string()
-    shape = f"{df.shape[0]} rows × {df.shape[1]} columns"
-    cols = ", ".join(df.columns.tolist()[:30])
-    sample = df.head(5).to_string()
-    missing = df.isnull().sum()
-    missing_str = missing[missing > 0].to_string() if missing.any() else "No missing values"
+    context = _build_dataframe_context(df)
 
     prompt = (
-        f"You are an expert data analyst. Analyze this dataset and provide 4-6 key insights "
-        f"with specific numbers. Be concise.\n\n"
-        f"Shape: {shape}\nColumns: {cols}\n\n"
-        f"Statistics:\n{desc}\n\n"
-        f"Missing values:\n{missing_str}\n\n"
-        f"Sample rows:\n{sample}"
+        f"You are an expert data analyst. Analyze this dataset and provide 4-6 key "
+        f"insights with specific numbers. Be concise.\n\n{context}"
     )
 
-    response = llm.invoke(prompt)
-    return response.content
+    response = _client.chat.completions.create(
+        model=settings.OPENAI_MODEL,
+        temperature=0.2,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content

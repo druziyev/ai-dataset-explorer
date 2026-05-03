@@ -132,8 +132,9 @@ def generate_charts(df: pd.DataFrame) -> list[dict]:
     # 5. Scatter plot for top-correlated pair
     if len(numeric_cols) >= 2:
         corr = df[numeric_cols].corr().abs()
-        np.fill_diagonal(corr.values, 0)
-        max_idx = np.unravel_index(corr.values.argmax(), corr.shape)
+        corr_arr = corr.to_numpy(copy=True)
+        np.fill_diagonal(corr_arr, 0)
+        max_idx = np.unravel_index(corr_arr.argmax(), corr_arr.shape)
         col_x = numeric_cols[max_idx[0]]
         col_y = numeric_cols[max_idx[1]]
 
@@ -142,7 +143,6 @@ def generate_charts(df: pd.DataFrame) -> list[dict]:
             title=f"Scatter — {col_x} vs {col_y}",
             color_discrete_sequence=["#a78bfa"],
             opacity=0.6,
-            trendline="ols",
         )
         fig.update_layout(**LAYOUT_TEMPLATE)
         charts.append({
